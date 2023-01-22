@@ -1,7 +1,18 @@
+# frozen_string_literal: true
+
+require 'simplecov'
+SimpleCov.start
+
 require 'sidekiq/limit_fetch'
 
-Sidekiq.logger = nil
-Sidekiq.redis = { namespace: ENV['namespace'] }
+if Sidekiq::LimitFetch.post_7?
+  Sidekiq.configure_embed do |config|
+    config.logger = nil
+  end
+else
+  Sidekiq.logger = nil
+  Sidekiq.redis = { namespace: ENV.fetch('namespace', nil) }
+end
 
 RSpec.configure do |config|
   config.order = :random
@@ -10,19 +21,19 @@ RSpec.configure do |config|
   config.before do
     Sidekiq::Queue.reset_instances!
     Sidekiq.redis do |it|
-      clean_redis = ->(queue) do
-        it.pipelined do
-          it.del "limit_fetch:limit:#{queue}"
-          it.del "limit_fetch:process_limit:#{queue}"
-          it.del "limit_fetch:busy:#{queue}"
-          it.del "limit_fetch:probed:#{queue}"
-          it.del "limit_fetch:pause:#{queue}"
-          it.del "limit_fetch:block:#{queue}"
+      clean_redis = lambda do |queue|
+        it.pipelined do |pipeline|
+          pipeline.del "limit_fetch:limit:#{queue}"
+          pipeline.del "limit_fetch:process_limit:#{queue}"
+          pipeline.del "limit_fetch:busy:#{queue}"
+          pipeline.del "limit_fetch:probed:#{queue}"
+          pipeline.del "limit_fetch:pause:#{queue}"
+          pipeline.del "limit_fetch:block:#{queue}"
         end
       end
 
       clean_redis.call(name) if defined?(name)
-      queues.each(&clean_redis) if defined?(queues) and queues.is_a? Array
+      queues.each(&clean_redis) if defined?(queues) && queues.is_a?(Array)
     end
   end
 end
